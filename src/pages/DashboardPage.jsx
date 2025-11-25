@@ -21,6 +21,104 @@ const APP_DESCRIPTIONS = {
   change: "Change & Configuration Management",
 };
 
+const ROLE_OPTIONS = [
+  "staff",
+  "admin",
+  "kepala_seksi",
+  "kepala_bidang",
+  "kepala_dinas",
+  "diskominfo",
+  "auditor",
+  "teknisi",
+];
+
+const GENDER_OPTIONS = [
+  { value: "laki_laki", label: "Laki - Laki" },
+  { value: "perempuan", label: "Perempuan" },
+];
+
+const normalizeGenderValue = (value) => {
+  if (!value) {
+    return "";
+  }
+  const raw = value.toString().trim();
+  const normalized = raw.toLowerCase().replace(/[\s-]+/g, "_");
+  const match = GENDER_OPTIONS.find(
+    (option) =>
+      option.value === normalized ||
+      option.label.toLowerCase() === raw.toLowerCase()
+  );
+  return match ? match.value : normalized;
+};
+
+const getGenderLabel = (value) => {
+  if (!value) {
+    return "Belum diatur";
+  }
+  const normalized = value.toString().trim().toLowerCase();
+  const match = GENDER_OPTIONS.find(
+    (option) =>
+      option.value === normalized ||
+      option.label.toLowerCase() === normalized
+  );
+  return match ? match.label : value;
+};
+
+const ACCOUNT_FORM_TEMPLATE = {
+  name: "",
+  email: "",
+  nip: "",
+  gender: "",
+  unit_kerja: "",
+  asal_dinas: "",
+  role: "",
+  password: "",
+};
+
+const buildEmptyAccountForm = () => ({ ...ACCOUNT_FORM_TEMPLATE });
+const USER_STORAGE_KEY = "sso_user";
+
+const PROFILE_FORM_TEMPLATE = {
+  name: "",
+  nip: "",
+  gender: "",
+  role: "",
+  unit_kerja: "",
+  asal_dinas: "",
+};
+
+const PASSWORD_FORM_TEMPLATE = {
+  current_password: "",
+  new_password: "",
+  confirm_password: "",
+};
+
+const buildProfileFormFromUser = (user) => {
+  const firstRole = user?.profile?.role || user?.roles?.[0]?.role || "";
+  return {
+    name: user?.name || "",
+    nip: user?.profile?.nip || user?.nip || "",
+    gender: normalizeGenderValue(user?.profile?.gender || user?.gender || ""),
+    role: firstRole,
+    unit_kerja: user?.profile?.unit_kerja || "",
+    asal_dinas: user?.profile?.asal_dinas || "",
+  };
+};
+
+const buildEmptyPasswordForm = () => ({ ...PASSWORD_FORM_TEMPLATE });
+
+const formatTitleCase = (value) => {
+  if (!value) {
+    return "";
+  }
+
+  return value
+    .toString()
+    .toLowerCase()
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+};
+
 const DashboardPage = () => {
   const navigate = useNavigate();
   const [user, setUser] = useState(() => getStoredUser());
@@ -28,6 +126,25 @@ const DashboardPage = () => {
   const [error, setError] = useState("");
   const [apps, setApps] = useState([]);
   const [appsLoading, setAppsLoading] = useState(true);
+  const [activeModal, setActiveModal] = useState(null);
+  const [newAccount, setNewAccount] = useState(() => buildEmptyAccountForm());
+  const [accountErrors, setAccountErrors] = useState({});
+  const [accountFeedback, setAccountFeedback] = useState("");
+  const [profileForm, setProfileForm] = useState(() =>
+    buildProfileFormFromUser(getStoredUser())
+  );
+  const [profileErrors, setProfileErrors] = useState({});
+  const [profileFeedback, setProfileFeedback] = useState("");
+  const [passwordForm, setPasswordForm] = useState(() =>
+    buildEmptyPasswordForm()
+  );
+  const [passwordErrors, setPasswordErrors] = useState({});
+  const [passwordFeedback, setPasswordFeedback] = useState("");
+  const [isProfileEditing, setIsProfileEditing] = useState(false);
+  const [isPasswordEditing, setIsPasswordEditing] = useState(false);
+  const [profileSubmitting, setProfileSubmitting] = useState(false);
+  const [passwordSubmitting, setPasswordSubmitting] = useState(false);
+  const [accountSubmitting, setAccountSubmitting] = useState(false);
 
   useEffect(() => {
     let ignore = false;
@@ -42,6 +159,7 @@ const DashboardPage = () => {
       .then((profile) => {
         if (!ignore) {
           setUser(profile);
+          setProfileForm(buildProfileFormFromUser(profile));
         }
       })
       .catch(async (err) => {
@@ -143,6 +261,301 @@ const DashboardPage = () => {
     window.open(finalUrl, "_blank", "noopener,noreferrer");
   };
 
+  const isProfileModalOpen = activeModal === "profile";
+  const isAddAccountModalOpen = activeModal === "addAccount";
+  const isStaff =
+    (user?.role_slugs || []).includes("staff") ||
+    (user?.roles || []).some(
+      (roleItem) => roleItem?.role?.toString().toLowerCase() === "staff"
+    );
+  const canEditProfile = isStaff;
+  const canEditPassword = true;
+  const passwordFieldsDisabled = !isPasswordEditing;
+  const primaryRole =
+    user?.roles?.[0]?.role ||
+    (user?.role_slugs && user.role_slugs.length > 0
+      ? user.role_slugs[0]
+      : "");
+  const primaryTenantName = user?.tenants?.[0]?.nama || "";
+  const profileRoleLabel =
+    formatTitleCase(profileForm.role || primaryRole || "") ||
+    "Belum ditetapkan";
+  const profileGenderLabel = getGenderLabel(profileForm.gender);
+  const handleResetAccountForm = () => {
+    setNewAccount(buildEmptyAccountForm());
+    setAccountErrors({});
+    setAccountFeedback("");
+  };
+
+  const handleResetProfileForm = () => {
+    setProfileForm(buildProfileFormFromUser(user));
+    setProfileErrors({});
+    setProfileFeedback("");
+  };
+
+  const handleResetPasswordForm = () => {
+    setPasswordForm(buildEmptyPasswordForm());
+    setPasswordErrors({});
+    setPasswordFeedback("");
+  };
+
+  const openProfileModal = () => {
+    if (!user) {
+      return;
+    }
+    setActiveModal("profile");
+    setAccountFeedback("");
+    setAccountErrors({});
+    handleResetProfileForm();
+    handleResetPasswordForm();
+    setIsProfileEditing(false);
+    setIsPasswordEditing(false);
+  };
+
+  const closeModal = () => {
+    setActiveModal(null);
+    handleResetAccountForm();
+    handleResetProfileForm();
+    handleResetPasswordForm();
+    setIsProfileEditing(false);
+    setIsPasswordEditing(false);
+  };
+
+  const handleStartAddAccount = () => {
+    handleResetAccountForm();
+    setActiveModal("addAccount");
+  };
+
+  const handleAccountChange = (field) => (event) => {
+    const value = event.target.value;
+    setNewAccount((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const toggleProfileEditing = () => {
+    if (!canEditProfile) {
+      return;
+    }
+    setIsProfileEditing((prev) => {
+      if (prev) {
+        handleResetProfileForm();
+        return false;
+      }
+      setProfileErrors({});
+      setProfileFeedback("");
+      return true;
+    });
+  };
+
+  const togglePasswordEditing = () => {
+    setIsPasswordEditing((prev) => {
+      if (prev) {
+        handleResetPasswordForm();
+        return false;
+      }
+      setPasswordErrors({});
+      setPasswordFeedback("");
+      return true;
+    });
+  };
+
+  const handleProfileChange = (field) => (event) => {
+    const value = event.target.value;
+    setProfileForm((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const persistUserProfile = (nextUser) => {
+    if (!nextUser) {
+      return;
+    }
+    setUser(nextUser);
+    setProfileForm(buildProfileFormFromUser(nextUser));
+    try {
+      window.localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(nextUser));
+    } catch {
+      // ignore quota errors
+    }
+  };
+
+  const handlePasswordChange = (field) => (event) => {
+    const value = event.target.value;
+    setPasswordForm((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const handleSubmitNewAccount = async (event) => {
+    event.preventDefault();
+    const requiredFields = {
+      name: "Nama lengkap wajib diisi.",
+      email: "Email wajib diisi.",
+      role: "Role wajib diisi.",
+      password: "Password wajib diisi.",
+    };
+    const nextErrors = {};
+
+    Object.entries(requiredFields).forEach(([field, message]) => {
+      if (!newAccount[field]?.trim()) {
+        nextErrors[field] = message;
+      }
+    });
+
+    setAccountErrors(nextErrors);
+
+    if (Object.keys(nextErrors).length > 0) {
+      setAccountFeedback("");
+      return;
+    }
+
+    setAccountSubmitting(true);
+    setAccountFeedback("");
+
+    try {
+      const payload = await apiRequest("/v1/staff/users", {
+        method: "POST",
+        body: JSON.stringify({
+          name: newAccount.name,
+          email: newAccount.email,
+          nip: newAccount.nip || null,
+          gender: newAccount.gender || null,
+          unit_kerja: newAccount.unit_kerja || null,
+          asal_dinas: newAccount.asal_dinas || null,
+          role: newAccount.role,
+          password: newAccount.password,
+        }),
+      });
+
+      setAccountErrors({});
+      handleResetAccountForm();
+      setAccountFeedback(payload?.message || "Akun baru berhasil dibuat.");
+    } catch (err) {
+      const errors = err.data?.errors;
+      if (errors) {
+        setAccountErrors({
+          name: errors.name?.[0],
+          email: errors.email?.[0],
+          role: errors.role?.[0],
+          password: errors.password?.[0],
+        });
+      }
+      setAccountFeedback(err.message || "Gagal menambahkan akun baru.");
+    } finally {
+      setAccountSubmitting(false);
+    }
+  };
+
+  const handleSubmitProfile = async (event) => {
+    event.preventDefault();
+    if (!isProfileEditing || !canEditProfile) {
+      return;
+    }
+    const nextErrors = {};
+    if (!profileForm.name.trim()) {
+      nextErrors.name = "Nama lengkap wajib diisi.";
+    }
+    if (profileForm.nip && profileForm.nip.length < 8) {
+      nextErrors.nip = "NIP minimal 8 digit atau kosongkan jika belum ada.";
+    }
+
+    setProfileErrors(nextErrors);
+    if (Object.keys(nextErrors).length > 0) {
+      setProfileFeedback("");
+      return;
+    }
+
+    setProfileSubmitting(true);
+    setProfileFeedback("");
+
+    try {
+      const payload = await apiRequest("/v1/auth/profile", {
+        method: "PUT",
+        body: JSON.stringify({
+          name: profileForm.name,
+          nip: profileForm.nip || null,
+          gender: profileForm.gender || null,
+          unit_kerja: profileForm.unit_kerja || null,
+          asal_dinas: profileForm.asal_dinas || null,
+        }),
+      });
+
+      if (payload?.user) {
+        persistUserProfile(payload.user);
+      }
+
+      setProfileErrors({});
+      setProfileFeedback(payload?.message || "Profil berhasil diperbarui.");
+      setIsProfileEditing(false);
+    } catch (err) {
+      const errors = err.data?.errors;
+      if (errors) {
+        setProfileErrors({
+          name: errors.name?.[0],
+          nip: errors.nip?.[0],
+          gender: errors.gender?.[0],
+          unit_kerja: errors.unit_kerja?.[0],
+          asal_dinas: errors.asal_dinas?.[0],
+        });
+      }
+      setProfileFeedback(err.message || "Gagal memperbarui profil.");
+    } finally {
+      setProfileSubmitting(false);
+    }
+  };
+
+  const handleSubmitPassword = async (event) => {
+    event.preventDefault();
+    if (!isPasswordEditing) {
+      return;
+    }
+    const nextErrors = {};
+
+    if (!passwordForm.current_password.trim()) {
+      nextErrors.current_password = "Password saat ini wajib diisi.";
+    }
+    if (!passwordForm.new_password.trim()) {
+      nextErrors.new_password = "Password baru wajib diisi.";
+    } else if (passwordForm.new_password.length < 8) {
+      nextErrors.new_password = "Password baru minimal 8 karakter.";
+    }
+    if (passwordForm.confirm_password !== passwordForm.new_password) {
+      nextErrors.confirm_password = "Konfirmasi password tidak cocok.";
+    }
+
+    setPasswordErrors(nextErrors);
+    if (Object.keys(nextErrors).length > 0) {
+      setPasswordFeedback("");
+      return;
+    }
+
+    setPasswordSubmitting(true);
+    setPasswordFeedback("");
+
+    try {
+      const payload = await apiRequest("/v1/auth/change-password", {
+        method: "POST",
+        body: JSON.stringify({
+          current_password: passwordForm.current_password,
+          new_password: passwordForm.new_password,
+          confirm_password: passwordForm.confirm_password,
+        }),
+      });
+
+      setPasswordErrors({});
+      handleResetPasswordForm();
+      setPasswordFeedback(payload?.message || "Password berhasil diperbarui.");
+      setIsPasswordEditing(false);
+    } catch (err) {
+      const errors = err.data?.errors;
+      if (errors) {
+        setPasswordErrors({
+          current_password: errors.current_password?.[0],
+          new_password: errors.new_password?.[0],
+          confirm_password: errors.confirm_password?.[0],
+        });
+      }
+      setPasswordFeedback(err.message || "Gagal memperbarui password.");
+    } finally {
+      setPasswordSubmitting(false);
+    }
+  };
+
   if (pageLoading) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-b from-[#0f2a48] to-[#274964] text-white font-sans">
@@ -194,12 +607,17 @@ const DashboardPage = () => {
 
         <div className="flex items-center gap-4">
           {user && (
-            <div className="text-right">
+            <button
+              type="button"
+              onClick={openProfileModal}
+              className="text-right px-3 py-2 rounded-xl border border-transparent hover:border-[#093757]/20 hover:bg-[#f5f8fa] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#25577a] transition"
+              aria-label="Lihat informasi pengguna"
+            >
               <p className="text-xs text-gray-400">Logged in as</p>
               <p className="text-sm font-semibold text-[#093757]">
                 {user.name}
               </p>
-            </div>
+            </button>
           )}
           <input
             type="text"
@@ -422,9 +840,546 @@ const DashboardPage = () => {
           © 2025 Pemkot Surabaya. All rights reserved. | Privacy Policy | Terms of Service
         </div>
       </footer>
+
+      {isProfileModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4">
+          <div className="relative w-full max-w-3xl rounded-2xl bg-white p-8 shadow-2xl">
+            <button
+              type="button"
+              onClick={closeModal}
+              className="absolute right-5 top-5 text-[#6a889f] transition hover:text-[#093757]"
+              aria-label="Tutup informasi pengguna"
+            >
+              &times;
+            </button>
+            <p className="text-center text-sm font-semibold uppercase tracking-wide text-[#6a889f]">
+              Profil Pengguna
+            </p>
+            <h3 className="mt-2 text-center text-2xl font-semibold text-[#093757]">
+              Selamat datang, {user?.name || "Pengguna"}!
+            </h3>
+            <p className="mt-2 mb-8 text-center text-sm text-[#294659]">
+              Informasi akun Anda ditampilkan di bawah ini. Untuk pembaruan data, hubungi admin SSO.
+            </p>
+            <div className="mt-10 space-y-10">
+              <section className="rounded-2xl border border-[#e0ecf6] bg-[#f7fbff] p-6">
+                <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-[#6a889f]">
+                      Informasi Profil
+                    </p>
+                    <h4 className="text-lg font-semibold text-[#093757]">
+                      {isProfileEditing ? "Perbarui data Anda" : "Detail akun dan dinas"}
+                    </h4>
+                    <p className="text-sm text-[#294659]">
+                      {isProfileEditing
+                        ? "Sesuaikan data berikut lalu simpan untuk memperbarui profil SSO Anda."
+                        : "Klik tombol edit untuk memperbarui informasi pribadi Anda."}
+                    </p>
+                  </div>
+                  {canEditProfile ? (
+                    <button
+                      type="button"
+                      onClick={toggleProfileEditing}
+                      className="rounded-lg border border-[#093757] px-4 py-2 text-sm font-semibold text-[#093757] transition hover:bg-[#093757] hover:text-white"
+                    >
+                      {isProfileEditing ? "Batalkan" : "Edit Profil"}
+                    </button>
+                  ) : (
+                    <span className="text-xs text-[#6a889f]">
+                      Hanya staff yang dapat mengubah data ini.
+                    </span>
+                  )}
+                </div>
+
+                <form className="space-y-6" onSubmit={handleSubmitProfile}>
+                  <div className="grid gap-5 md:grid-cols-2">
+                    <div className="flex flex-col gap-2">
+                      <span className="text-xs font-semibold uppercase tracking-wide text-[#6a889f]">
+                        Nama lengkap
+                      </span>
+                      {isProfileEditing ? (
+                        <input
+                          id="profile-name"
+                          type="text"
+                          className="rounded-lg border border-[#d7e6f1] px-4 py-2 focus:border-[#093757] focus:outline-none focus:ring-2 focus:ring-[#93c5fd]"
+                          value={profileForm.name}
+                          onChange={handleProfileChange("name")}
+                          autoComplete="name"
+                        />
+                      ) : (
+                        <div className="rounded-lg border border-[#d7e6f1] bg-[#f0f6fb] px-4 py-3 text-[#0f2a48]">
+                          {profileForm.name || "-"}
+                        </div>
+                      )}
+                      {isProfileEditing && profileErrors.name && (
+                        <p className="text-xs text-red-500">{profileErrors.name}</p>
+                      )}
+                    </div>
+
+                    <div className="flex flex-col gap-2">
+                      <span className="text-xs font-semibold uppercase tracking-wide text-[#6a889f]">
+                        NIP
+                      </span>
+                      {isProfileEditing ? (
+                        <input
+                          id="profile-nip"
+                          type="text"
+                          className="rounded-lg border border-[#d7e6f1] px-4 py-2 focus:border-[#093757] focus:outline-none focus:ring-2 focus:ring-[#93c5fd]"
+                          value={profileForm.nip}
+                          onChange={handleProfileChange("nip")}
+                          autoComplete="off"
+                        />
+                      ) : (
+                        <div className="rounded-lg border border-[#d7e6f1] bg-[#f0f6fb] px-4 py-3 text-[#0f2a48]">
+                          {profileForm.nip || "-"}
+                        </div>
+                      )}
+                      {isProfileEditing && profileErrors.nip && (
+                        <p className="text-xs text-red-500">{profileErrors.nip}</p>
+                      )}
+                    </div>
+
+                    <div className="flex flex-col gap-2">
+                      <span className="text-xs font-semibold uppercase tracking-wide text-[#6a889f]">
+                        Jenis kelamin
+                      </span>
+                      {isProfileEditing ? (
+                        <select
+                          id="profile-gender"
+                          className="rounded-lg border border-[#d7e6f1] px-4 py-2 text-sm focus:border-[#093757] focus:outline-none focus:ring-2 focus:ring-[#93c5fd]"
+                          value={profileForm.gender}
+                          onChange={handleProfileChange("gender")}
+                        >
+                          <option value="">Pilih jenis kelamin</option>
+                          {GENDER_OPTIONS.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        <div className="rounded-lg border border-[#d7e6f1] bg-[#f0f6fb] px-4 py-3 text-[#0f2a48]">
+                          {profileGenderLabel}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="flex flex-col gap-2">
+                      <span className="text-xs font-semibold uppercase tracking-wide text-[#6a889f]">
+                        Role
+                      </span>
+                      <div className="rounded-lg border border-dashed border-[#d7e6f1] bg-[#f0f6fb] px-4 py-3 text-[#0f2a48]">
+                        {profileRoleLabel}
+                      </div>
+                      <p className="text-xs text-[#6a889f]">
+                        Role ditentukan oleh staff SSO dan tidak dapat diubah dari sini.
+                      </p>
+                    </div>
+
+                    <div className="flex flex-col gap-2">
+                      <span className="text-xs font-semibold uppercase tracking-wide text-[#6a889f]">
+                        Unit Kerja
+                      </span>
+                      {isProfileEditing ? (
+                        <input
+                          id="profile-unit"
+                          type="text"
+                          className="rounded-lg border border-[#d7e6f1] px-4 py-2 focus:border-[#093757] focus:outline-none focus:ring-2 focus:ring-[#93c5fd]"
+                          value={profileForm.unit_kerja}
+                          onChange={handleProfileChange("unit_kerja")}
+                        />
+                      ) : (
+                        <div className="rounded-lg border border-[#d7e6f1] bg-[#f0f6fb] px-4 py-3 text-[#0f2a48]">
+                          {profileForm.unit_kerja || primaryTenantName || "Belum diatur"}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="flex flex-col gap-2">
+                      <span className="text-xs font-semibold uppercase tracking-wide text-[#6a889f]">
+                        Asal Dinas
+                      </span>
+                      {isProfileEditing ? (
+                        <input
+                          id="profile-dinas"
+                          type="text"
+                          className="rounded-lg border border-[#d7e6f1] px-4 py-2 focus:border-[#093757] focus:outline-none focus:ring-2 focus:ring-[#93c5fd]"
+                          value={profileForm.asal_dinas}
+                          onChange={handleProfileChange("asal_dinas")}
+                        />
+                      ) : (
+                        <div className="rounded-lg border border-[#d7e6f1] bg-[#f0f6fb] px-4 py-3 text-[#0f2a48]">
+                          {profileForm.asal_dinas || primaryTenantName || "Belum diatur"}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="flex flex-col gap-2 md:col-span-2">
+                      <span className="text-xs font-semibold uppercase tracking-wide text-[#6a889f]">
+                        Email (dari SSO)
+                      </span>
+                      <div className="rounded-lg border border-dashed border-[#d7e6f1] bg-[#f0f6fb] px-4 py-3 text-[#6b7f92]">
+                        {user?.email || "-"}
+                      </div>
+                      <p className="text-xs text-[#6a889f]">
+                        Email terintegrasi dengan backend SSO dan tidak dapat diedit dari sini.
+                      </p>
+                    </div>
+                  </div>
+
+                  {profileFeedback && (
+                    <div className="rounded-lg border border-[#b6d6f2] bg-[#e6f4ff] px-4 py-3 text-sm text-[#0f2a48]">
+                      {profileFeedback}
+                    </div>
+                  )}
+
+                  {isProfileEditing && canEditProfile && (
+                    <div className="flex flex-wrap justify-end gap-3">
+                      <button
+                        type="button"
+                        onClick={handleResetProfileForm}
+                        disabled={profileSubmitting}
+                        className={`rounded-xl border border-[#093757] px-5 py-2 text-sm font-semibold text-[#093757] transition hover:bg-[#093757] hover:text-white ${
+                          profileSubmitting ? "opacity-50 cursor-not-allowed" : ""
+                        }`}
+                      >
+                        Reset
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={profileSubmitting}
+                        className={`rounded-xl bg-[#093757] px-5 py-2 text-sm font-semibold text-white transition hover:bg-[#0e4f76] ${
+                          profileSubmitting ? "opacity-50 cursor-not-allowed" : ""
+                        }`}
+                      >
+                        Simpan Profil
+                      </button>
+                    </div>
+                  )}
+                </form>
+              </section>
+
+              <section className="rounded-2xl border border-[#e0ecf6] bg-white p-6 shadow-sm">
+                <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-[#6a889f]">
+                      Ganti Password
+                    </p>
+                    <h4 className="text-lg font-semibold text-[#093757]">
+                      Perbarui kata sandi akun Anda
+                    </h4>
+                    <p className="text-sm text-[#294659]">
+                      Demi keamanan, gunakan password yang kuat dan berbeda dari sistem lain.
+                    </p>
+                  </div>
+                  {canEditPassword && (
+                    <button
+                      type="button"
+                      onClick={togglePasswordEditing}
+                      className="rounded-lg border border-[#093757] px-4 py-2 text-sm font-semibold text-[#093757] transition hover:bg-[#093757] hover:text-white"
+                    >
+                      {isPasswordEditing ? "Batalkan" : "Edit Password"}
+                    </button>
+                  )}
+                </div>
+                <form className="space-y-5" onSubmit={handleSubmitPassword}>
+                  <div>
+                    <label className="text-sm font-semibold text-[#0f2a48]" htmlFor="password-current">
+                      Password saat ini
+                    </label>
+                    <input
+                      id="password-current"
+                      type="password"
+                      className="mt-2 w-full rounded-lg border border-[#d7e6f1] px-4 py-2 focus:border-[#093757] focus:outline-none focus:ring-2 focus:ring-[#93c5fd]"
+                      value={passwordForm.current_password}
+                      onChange={handlePasswordChange("current_password")}
+                      autoComplete="current-password"
+                      disabled={passwordFieldsDisabled}
+                    />
+                    {passwordErrors.current_password && (
+                      <p className="mt-1 text-xs text-red-500">{passwordErrors.current_password}</p>
+                    )}
+                  </div>
+                  <div className="grid gap-5 md:grid-cols-2">
+                    <div>
+                      <label className="text-sm font-semibold text-[#0f2a48]" htmlFor="password-new">
+                        Password baru
+                      </label>
+                      <input
+                        id="password-new"
+                        type="password"
+                        className="mt-2 w-full rounded-lg border border-[#d7e6f1] px-4 py-2 focus:border-[#093757] focus:outline-none focus:ring-2 focus:ring-[#93c5fd]"
+                        value={passwordForm.new_password}
+                        onChange={handlePasswordChange("new_password")}
+                        autoComplete="new-password"
+                        disabled={passwordFieldsDisabled}
+                      />
+                      {passwordErrors.new_password && (
+                        <p className="mt-1 text-xs text-red-500">{passwordErrors.new_password}</p>
+                      )}
+                    </div>
+                    <div>
+                      <label className="text-sm font-semibold text-[#0f2a48]" htmlFor="password-confirm">
+                        Konfirmasi password baru
+                      </label>
+                      <input
+                        id="password-confirm"
+                        type="password"
+                        className="mt-2 w-full rounded-lg border border-[#d7e6f1] px-4 py-2 focus:border-[#093757] focus:outline-none focus:ring-2 focus:ring-[#93c5fd]"
+                        value={passwordForm.confirm_password}
+                        onChange={handlePasswordChange("confirm_password")}
+                        autoComplete="new-password"
+                        disabled={passwordFieldsDisabled}
+                      />
+                      {passwordErrors.confirm_password && (
+                        <p className="mt-1 text-xs text-red-500">{passwordErrors.confirm_password}</p>
+                      )}
+                    </div>
+                  </div>
+                  {passwordFeedback && (
+                    <div className="rounded-lg border border-[#b6d6f2] bg-[#e6f4ff] px-4 py-3 text-sm text-[#0f2a48]">
+                      {passwordFeedback}
+                    </div>
+                  )}
+                  {isPasswordEditing && (
+                    <div className="flex flex-wrap gap-3 justify-end">
+                      <button
+                        type="button"
+                        onClick={handleResetPasswordForm}
+                        disabled={passwordSubmitting}
+                        className={`rounded-xl border border-[#093757] px-5 py-2 text-sm font-semibold text-[#093757] transition hover:bg-[#093757] hover:text-white ${
+                          passwordSubmitting ? "opacity-50 cursor-not-allowed" : ""
+                        }`}
+                      >
+                        Reset
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={passwordSubmitting}
+                        className={`rounded-xl bg-[#093757] px-5 py-2 text-sm font-semibold text-white transition hover:bg-[#0e4f76] ${
+                          passwordSubmitting ? "opacity-50 cursor-not-allowed" : ""
+                        }`}
+                      >
+                        Simpan Password
+                      </button>
+                    </div>
+                  )}
+                </form>
+              </section>
+            </div>
+            {isStaff && (
+              <button
+                type="button"
+                onClick={handleStartAddAccount}
+                className="mt-10 w-full rounded-xl bg-[#093757] px-6 py-3 text-sm font-semibold text-white transition hover:bg-[#0e4f76]"
+              >
+                Tambahkan Akun
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {isAddAccountModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4">
+          <div className="relative w-full max-w-2xl rounded-2xl bg-white p-8 shadow-2xl">
+            <button
+              type="button"
+              onClick={closeModal}
+              className="absolute right-5 top-5 text-[#6a889f] transition hover:text-[#093757]"
+              aria-label="Tutup formulir tambah akun"
+            >
+              &times;
+            </button>
+            <div className="mb-8">
+              <p className="text-sm font-semibold uppercase tracking-wide text-[#6a889f]">
+                Registrasi Akun Staff
+              </p>
+              <h3 className="mt-2 text-2xl font-semibold text-[#093757]">
+                Tambahkan Akun Baru
+              </h3>
+              <p className="mt-1 text-sm text-[#294659]">
+                Lengkapi detail pengguna berikut. Kolom role dan password wajib diisi sebelum disimpan.
+              </p>
+            </div>
+            <form className="space-y-6" onSubmit={handleSubmitNewAccount}>
+              <div className="grid gap-5 md:grid-cols-2">
+                <div>
+                  <label className="text-sm font-semibold text-[#0f2a48]" htmlFor="account-name">
+                    Nama lengkap
+                  </label>
+                  <input
+                    id="account-name"
+                    type="text"
+                    className="mt-2 w-full rounded-lg border border-[#d7e6f1] px-4 py-2 focus:border-[#093757] focus:outline-none focus:ring-2 focus:ring-[#93c5fd]"
+                    placeholder="Contoh: Slamet Budianto"
+                    value={newAccount.name}
+                    onChange={handleAccountChange("name")}
+                    autoComplete="name"
+                  />
+                  {accountErrors.name && (
+                    <p className="mt-1 text-xs text-red-500">{accountErrors.name}</p>
+                  )}
+                </div>
+                <div>
+                  <label className="text-sm font-semibold text-[#0f2a48]" htmlFor="account-email">
+                    Email
+                  </label>
+                  <input
+                    id="account-email"
+                    type="email"
+                    className="mt-2 w-full rounded-lg border border-[#d7e6f1] px-4 py-2 focus:border-[#093757] focus:outline-none focus:ring-2 focus:ring-[#93c5fd]"
+                    placeholder="contoh@sso.local"
+                    value={newAccount.email}
+                    onChange={handleAccountChange("email")}
+                    autoComplete="email"
+                  />
+                  {accountErrors.email && (
+                    <p className="mt-1 text-xs text-red-500">{accountErrors.email}</p>
+                  )}
+                </div>
+                <div>
+                  <label className="text-sm font-semibold text-[#0f2a48]" htmlFor="account-nip">
+                    NIP
+                  </label>
+                  <input
+                    id="account-nip"
+                    type="text"
+                    className="mt-2 w-full rounded-lg border border-[#d7e6f1] px-4 py-2 focus:border-[#093757] focus:outline-none focus:ring-2 focus:ring-[#93c5fd]"
+                    placeholder="110920471983"
+                    value={newAccount.nip}
+                    onChange={handleAccountChange("nip")}
+                    autoComplete="off"
+                  />
+                </div>
+                <div>
+                  <label className="text-sm font-semibold text-[#0f2a48]" htmlFor="account-gender">
+                    Jenis kelamin
+                  </label>
+                  <select
+                    id="account-gender"
+                    className="mt-2 w-full rounded-lg border border-[#d7e6f1] px-4 py-2 text-sm focus:border-[#093757] focus:outline-none focus:ring-2 focus:ring-[#93c5fd]"
+                    value={newAccount.gender}
+                    onChange={handleAccountChange("gender")}
+                  >
+                    <option value="">Pilih jenis kelamin</option>
+                    {GENDER_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-sm font-semibold text-[#0f2a48]" htmlFor="account-unit">
+                    Unit Kerja
+                  </label>
+                  <input
+                    id="account-unit"
+                    type="text"
+                    className="mt-2 w-full rounded-lg border border-[#d7e6f1] px-4 py-2 focus:border-[#093757] focus:outline-none focus:ring-2 focus:ring-[#93c5fd]"
+                    placeholder="Bidang Pencegahan Penyakit"
+                    value={newAccount.unit_kerja}
+                    onChange={handleAccountChange("unit_kerja")}
+                    autoComplete="organization"
+                  />
+                </div>
+                <div className="md:col-span-2">
+                  <label className="text-sm font-semibold text-[#0f2a48]" htmlFor="account-dinas">
+                    Asal Dinas
+                  </label>
+                  <input
+                    id="account-dinas"
+                    type="text"
+                    className="mt-2 w-full rounded-lg border border-[#d7e6f1] px-4 py-2 focus:border-[#093757] focus:outline-none focus:ring-2 focus:ring-[#93c5fd]"
+                    placeholder="Dinas Kesehatan Prov. Jawa Timur"
+                    value={newAccount.asal_dinas}
+                    onChange={handleAccountChange("asal_dinas")}
+                  />
+                </div>
+                <div>
+                  <label className="text-sm font-semibold text-[#0f2a48]" htmlFor="account-role">
+                    Role
+                  </label>
+                  <select
+                    id="account-role"
+                    className="mt-2 w-full rounded-lg border border-[#d7e6f1] px-4 py-2 text-sm focus:border-[#093757] focus:outline-none focus:ring-2 focus:ring-[#93c5fd]"
+                    value={newAccount.role}
+                    onChange={handleAccountChange("role")}
+                  >
+                    <option value="">Pilih role pengguna</option>
+                    {ROLE_OPTIONS.map((role) => (
+                      <option key={role} value={role}>
+                        {formatTitleCase(role)}
+                      </option>
+                    ))}
+                  </select>
+                  {accountErrors.role && (
+                    <p className="mt-1 text-xs text-red-500">{accountErrors.role}</p>
+                  )}
+                </div>
+                <div>
+                  <label className="text-sm font-semibold text-[#0f2a48]" htmlFor="account-password">
+                    Password
+                  </label>
+                  <input
+                    id="account-password"
+                    type="password"
+                    className="mt-2 w-full rounded-lg border border-[#d7e6f1] px-4 py-2 focus:border-[#093757] focus:outline-none focus:ring-2 focus:ring-[#93c5fd]"
+                    placeholder="Minimal 8 karakter"
+                    value={newAccount.password}
+                    onChange={handleAccountChange("password")}
+                    autoComplete="new-password"
+                  />
+                  {accountErrors.password && (
+                    <p className="mt-1 text-xs text-red-500">{accountErrors.password}</p>
+                  )}
+                </div>
+              </div>
+
+              {accountFeedback && (
+                <div className="rounded-lg border border-[#b6d6f2] bg-[#e6f4ff] px-4 py-3 text-sm text-[#0f2a48]">
+                  {accountFeedback}
+                </div>
+              )}
+
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <button
+                  type="button"
+                  onClick={openProfileModal}
+                  className="text-sm font-semibold text-[#093757] transition hover:text-[#0e4f76]"
+                >
+                  Kembali ke informasi akun
+                </button>
+                <div className="flex flex-wrap gap-3">
+                  <button
+                    type="button"
+                    onClick={handleResetAccountForm}
+                    disabled={accountSubmitting}
+                    className={`rounded-xl border border-[#093757] px-5 py-2 text-sm font-semibold text-[#093757] transition hover:bg-[#093757] hover:text-white ${
+                      accountSubmitting ? "opacity-50 cursor-not-allowed" : ""
+                    }`}
+                  >
+                    Reset
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={accountSubmitting}
+                    className={`rounded-xl bg-[#093757] px-5 py-2 text-sm font-semibold text-white transition hover:bg-[#0e4f76] ${
+                      accountSubmitting ? "opacity-50 cursor-not-allowed" : ""
+                    }`}
+                  >
+                    Simpan Akun
+                  </button>
+                </div>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
 
 export default DashboardPage;
-
