@@ -1,7 +1,11 @@
-import { useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { FcGoogle } from "react-icons/fc";
-import { useNavigate } from "react-router-dom";
-import { login as loginRequest } from "../services/auth";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import {
+  login as loginRequest,
+  hasToken,
+  clearSession,
+} from "../services/auth";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
@@ -9,6 +13,58 @@ export default function LoginPage() {
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const redirectParam = searchParams.get("redirect");
+  const forceLogin = searchParams.get("force_login") === "1";
+
+  const redirectTarget = useMemo(() => {
+    if (!redirectParam) {
+      return null;
+    }
+    try {
+      return new URL(redirectParam);
+    } catch {
+      return null;
+    }
+  }, [redirectParam]);
+
+  useEffect(() => {
+    if (!forceLogin) {
+      return;
+    }
+    clearSession();
+    const params = new URLSearchParams(window.location.search);
+    params.delete("force_login");
+    const nextQuery = params.toString();
+    const nextUrl = `${window.location.pathname}${
+      nextQuery ? `?${nextQuery}` : ""
+    }`;
+    window.history.replaceState({}, "", nextUrl);
+  }, [forceLogin]);
+
+  const redirectToRequestedApp = useCallback(
+    (token) => {
+      if (!redirectTarget) {
+        return false;
+      }
+      const nextUrl = new URL(redirectTarget.toString());
+      if (token) {
+        nextUrl.searchParams.set("sso_token", token);
+      }
+      window.location.href = nextUrl.toString();
+      return true;
+    },
+    [redirectTarget]
+  );
+
+  useEffect(() => {
+    if (!redirectTarget || forceLogin) {
+      return;
+    }
+    if (hasToken()) {
+      redirectToRequestedApp(localStorage.getItem("sso_token"));
+    }
+  }, [redirectTarget, redirectToRequestedApp, forceLogin]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -16,8 +72,11 @@ export default function LoginPage() {
     setSubmitting(true);
 
     try {
-      await loginRequest(email, password);
-      navigate("/dashboard");
+      const data = await loginRequest(email, password);
+      const token = data?.token || localStorage.getItem("sso_token");
+      if (!redirectToRequestedApp(token)) {
+        navigate("/dashboard");
+      }
     } catch (err) {
       setError(err.message || "Gagal masuk, silakan coba kembali.");
     } finally {
@@ -180,3 +239,5 @@ export default function LoginPage() {
     </div>
   );
 }
+
+
